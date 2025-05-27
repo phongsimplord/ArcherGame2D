@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel 2D Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+        }
+        
+        canvas {
+            border: 2px solid #333;
+            background: #87CEEB;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+        
+        .menu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            z-index: 10;
+        }
+        
+        .menu h1 {
+            font-size: 48px;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .menu button {
+            display: block;
+            margin: 10px auto;
+            padding: 15px 30px;
+            font-size: 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .menu button:hover {
+            background: #45a049;
+        }
+        
+        .hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 18px;
+            z-index: 5;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: red;
+            z-index: 10;
+            font-size: 24px;
+        }
+        
+        .controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            font-size: 12px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        }
+    </style>
+</head>
+<body>
+    <div class="menu" id="menu">
+        <h1>PIXEL WARRIOR</h1>
+        <button onclick="startGame()">CHƠI GAME</button>
+        <button onclick="exitGame()">THOÁT</button>
+    </div>
+    
+    <div class="hud" id="hud" style="display: none;">
+        <div>Máu: <span id="health">5</span>/5</div>
+        <div>Điểm: <span id="score">0</span></div>
+    </div>
+    
+    <div class="game-over" id="gameOver" style="display: none;">
+        <h2>GAME OVER!</h2>
+        <p>Điểm của bạn: <span id="finalScore">0</span></p>
+        <button onclick="showMenu()">VỀ MENU</button>
+    </div>
+    
+    <div class="controls" id="controls" style="display: none;">
+        A/D: Di chuyển | W: Nhảy | S: Thủ thế (chặn đòn tấn công) | J: Bắn cung
+    </div>
+    
+    <canvas id="gameCanvas" width="800" height="600" style="display: none;"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game states
+        let gameState = 'menu'; // menu, playing, gameOver
+        let score = 0;
+        
+        // Player object
+        const player = {
+            x: 400,
+            y: 400,
+            width: 64,
+            height: 64,
+            velocityX: 0,
+            velocityY: 0,
+            speed: 5,
+            jumpPower: 15,
+            onGround: false,
+            health: 5,
+            maxHealth: 5,
+            state: 'idle', // idle, attack, crouch
+            direction: 1, // 1 = right, -1 = left
+            animFrame: 0,
+            animTimer: 0,
+            attackTimer: 0,
+            invulnerableTimer: 0
+        };
+        
+        // Arrows array
+        let arrows = [];
+        
+        // Enemy array
+        let enemies = [];
+        let enemySpawnTimer = 0;
+        let canSpawnEnemy = true;
+        
+        // Input handling
+        const keys = {};
+        
+        // Game constants
+        const gravity = 0.8;
+        const groundY = 500;
+        const friction = 0.8;
+        
+        // Create simple pixel art sprites using canvas
+        function createPlayerSprite(state, frame, direction) {
+            const spriteCanvas = document.createElement('canvas');
+            spriteCanvas.width = 64;
+            spriteCanvas.height = 64;
+            const spriteCtx = spriteCanvas.getContext('2d');
+            
+            // Simple pixel archer character
+            spriteCtx.fillStyle = '#228B22'; // Green tunic
+            spriteCtx.fillRect(20, 20, 24, 32);
+            
+            // Head
+            spriteCtx.fillStyle = '#FFB347'; // Skin color
+            spriteCtx.fillRect(24, 8, 16, 16);
+            
+            // Eyes (facing direction)
+            spriteCtx.fillStyle = '#000';
+            if (direction === 1) { // Looking right
+                spriteCtx.fillRect(30, 12, 2, 2);
+                spriteCtx.fillRect(36, 12, 2, 2);
+            } else { // Looking left
+                spriteCtx.fillRect(26, 12, 2, 2);
+                spriteCtx.fillRect(32, 12, 2, 2);
+            }
+            
+            // Nose (pointing direction)
+            spriteCtx.fillStyle = '#FFB347';
+            if (direction === 1) {
+                spriteCtx.fillRect(38, 16, 2, 1);
+            } else {
+                spriteCtx.fillRect(24, 16, 2, 1);
+            }
+            
+            // Arms and bow
+            spriteCtx.fillStyle = '#FFB347';
+            if (state === 'attack') {
+                // Drawing bow
+                if (direction === 1) {
+                    // Right arm extended
+                    spriteCtx.fillRect(44, 24, 12, 4);
+                    // Left arm holding bow
+                    spriteCtx.fillRect(12, 28, 8, 4);
+                    // Bow
+                    spriteCtx.fillStyle = '#8B4513';
+                    spriteCtx.fillRect(8, 20, 4, 16);
+                    spriteCtx.fillRect(6, 20, 2, 2);
+                    spriteCtx.fillRect(6, 34, 2, 2);
+                    // Arrow
+                    spriteCtx.fillStyle = '#CD853F';
+                    spriteCtx.fillRect(12, 29, 32, 2);
+                    spriteCtx.fillStyle = '#FFD700';
+                    spriteCtx.fillRect(44, 28, 4, 4);
+                } else {
+                    // Left arm extended
+                    spriteCtx.fillRect(8, 24, 12, 4);
+                    // Right arm holding bow
+                    spriteCtx.fillRect(44, 28, 8, 4);
+                    // Bow
+                    spriteCtx.fillStyle = '#8B4513';
+                    spriteCtx.fillRect(52, 20, 4, 16);
+                    spriteCtx.fillRect(56, 20, 2, 2);
+                    spriteCtx.fillRect(56, 34, 2, 2);
+                    // Arrow
+                    spriteCtx.fillStyle = '#CD853F';
+                    spriteCtx.fillRect(20, 29, 32, 2);
+                    spriteCtx.fillStyle = '#FFD700';
+                    spriteCtx.fillRect(16, 28, 4, 4);
+                }
+            } else {
+                // Normal arms with bow
+                if (direction === 1) {
+                    spriteCtx.fillRect(12, 28, 8, 4);
+                    spriteCtx.fillRect(44, 28, 8, 4);
+                    // Bow held vertically
+                    spriteCtx.fillStyle = '#8B4513';
+                    spriteCtx.fillRect(46, 16, 4, 20);
+                    spriteCtx.fillRect(44, 16, 2, 2);
+                    spriteCtx.fillRect(44, 34, 2, 2);
+                } else {
+                    spriteCtx.fillRect(12, 28, 8, 4);
+                    spriteCtx.fillRect(44, 28, 8, 4);
+                    // Bow held vertically
+                    spriteCtx.fillStyle = '#8B4513';
+                    spriteCtx.fillRect(14, 16, 4, 20);
+                    spriteCtx.fillRect(18, 16, 2, 2);
+                    spriteCtx.fillRect(18, 34, 2, 2);
+                }
+            }
+            
+            // Legs (defensive stance when crouching)
+            spriteCtx.fillStyle = '#8B4513'; // Brown pants
+            if (state === 'crouch') {
+                spriteCtx.fillRect(22, 45, 8, 12); // Crouched legs
+                spriteCtx.fillRect(34, 45, 8, 12);
+                // Add shield effect
+                spriteCtx.fillStyle = '#C0C0C0'; // Silver shield
+                if (direction === 1) {
+                    spriteCtx.fillRect(16, 24, 4, 20);
+                } else {
+                    spriteCtx.fillRect(44, 24, 4, 20);
+                }
+                spriteCtx.fillStyle = '#FFD700'; // Gold rim
+                if (direction === 1) {
+                    spriteCtx.fillRect(15, 23, 6, 2);
+                    spriteCtx.fillRect(15, 43, 6, 2);
+                } else {
+                    spriteCtx.fillRect(43, 23, 6, 2);
+                    spriteCtx.fillRect(43, 43, 6, 2);
+                }
+            } else if (state === 'idle' && Math.floor(frame / 30) % 2 === 0) {
+                spriteCtx.fillRect(24, 52, 6, 12);
+                spriteCtx.fillRect(34, 52, 6, 10);
+            } else {
+                spriteCtx.fillRect(24, 52, 6, 12);
+                spriteCtx.fillRect(34, 52, 6, 12);
+            }
+            
+            return spriteCanvas;
+        }
+        
+        function createEnemySprite(state, frame) {
+            const spriteCanvas = document.createElement('canvas');
+            spriteCanvas.width = 64;
+            spriteCanvas.height = 64;
+            const spriteCtx = spriteCanvas.getContext('2d');
+            
+            // Simple enemy character (red)
+            spriteCtx.fillStyle = '#DC143C'; // Red body
+            spriteCtx.fillRect(20, 20, 24, 32);
+            
+            // Head
+            spriteCtx.fillStyle = '#8B0000'; // Dark red head
+            spriteCtx.fillRect(24, 8, 16, 16);
+            
+            // Eyes (angry)
+            spriteCtx.fillStyle = '#FF0000';
+            spriteCtx.fillRect(26, 12, 3, 3);
+            spriteCtx.fillRect(35, 12, 3, 3);
+            
+            // Arms
+            spriteCtx.fillStyle = '#8B0000';
+            if (state === 'attack' && frame % 2 === 0) {
+                spriteCtx.fillRect(12, 24, 8, 4); // Extended arm
+            } else {
+                spriteCtx.fillRect(12, 28, 8, 4);
+                spriteCtx.fillRect(44, 28, 8, 4);
+            }
+            
+            // Legs
+            spriteCtx.fillStyle = '#654321';
+            if (Math.floor(frame / 20) % 2 === 0) {
+                spriteCtx.fillRect(24, 52, 6, 12);
+                spriteCtx.fillRect(34, 52, 6, 10);
+            } else {
+                spriteCtx.fillRect(24, 52, 6, 10);
+                spriteCtx.fillRect(34, 52, 6, 12);
+            }
+            
+            return spriteCanvas;
+        }
+        
+        // Create ground tiles
+        function drawGround() {
+            ctx.fillStyle = '#228B22'; // Green ground
+            ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+            
+            // Grass details
+            ctx.fillStyle = '#32CD32';
+            for (let x = 0; x < canvas.width; x += 20) {
+                ctx.fillRect(x, groundY, 2, 8);
+                ctx.fillRect(x + 5, groundY, 2, 6);
+                ctx.fillRect(x + 10, groundY, 2, 7);
+                ctx.fillRect(x + 15, groundY, 2, 5);
+            }
+        }
+        
+        // Arrow class
+        class Arrow {
+            constructor(x, y, direction) {
+                this.x = x;
+                this.y = y;
+                this.width = 20;
+                this.height = 4;
+                this.speed = 12;
+                this.direction = direction;
+            }
+            
+            update() {
+                this.x += this.speed * this.direction;
+            }
+            
+            draw() {
+                ctx.fillStyle = '#CD853F'; // Brown shaft
+                ctx.fillRect(this.x, this.y, this.width - 4, this.height);
+                
+                // Arrowhead
+                ctx.fillStyle = '#C0C0C0'; // Silver tip
+                if (this.direction === 1) {
+                    ctx.fillRect(this.x + this.width - 4, this.y - 2, 4, 8);
+                } else {
+                    ctx.fillRect(this.x, this.y - 2, 4, 8);
+                }
+                
+                // Fletching
+                ctx.fillStyle = '#FF0000'; // Red feathers
+                if (this.direction === 1) {
+                    ctx.fillRect(this.x, this.y - 1, 4, 2);
+                    ctx.fillRect(this.x, this.y + 3, 4, 2);
+                } else {
+                    ctx.fillRect(this.x + this.width - 4, this.y - 1, 4, 2);
+                    ctx.fillRect(this.x + this.width - 4, this.y + 3, 4, 2);
+                }
+            }
+            
+            isOffscreen() {
+                return this.x < -50 || this.x > canvas.width + 50;
+            }
+        }
+        class Enemy {
+            constructor(x, side) {
+                this.x = x;
+                this.y = groundY - 64;
+                this.width = 64;
+                this.height = 64;
+                this.speed = 2;
+                this.health = 1;
+                this.state = 'idle';
+                this.direction = side === 'left' ? 1 : -1;
+                this.animFrame = 0;
+                this.animTimer = 0;
+                this.attackTimer = 0;
+                this.attackCooldown = 0;
+            }
+            
+            update() {
+                this.animTimer++;
+                if (this.animTimer % 10 === 0) {
+                    this.animFrame++;
+                }
+                
+                // Move towards player
+                const distanceToPlayer = Math.abs(this.x - player.x);
+                if (distanceToPlayer > 80) {
+                    if (this.x < player.x) {
+                        this.x += this.speed;
+                        this.direction = 1;
+                    } else {
+                        this.x -= this.speed;
+                        this.direction = -1;
+                    }
+                    this.state = 'idle';
+                } else {
+                    // Attack player if close enough
+                    if (this.attackCooldown <= 0 && distanceToPlayer < 80) {
+                        this.state = 'attack';
+                        this.attackTimer = 30;
+                        this.attackCooldown = 60;
+                        
+                        // Damage player (only if not crouching/defending)
+                        if (player.invulnerableTimer <= 0 && player.state !== 'crouch') {
+                            player.health--;
+                            player.invulnerableTimer = 60;
+                            if (player.health <= 0) {
+                                gameOver();
+                            }
+                        }
+                    }
+                }
+                
+                if (this.attackTimer > 0) {
+                    this.attackTimer--;
+                    if (this.attackTimer === 0) {
+                        this.state = 'idle';
+                    }
+                }
+                
+                if (this.attackCooldown > 0) {
+                    this.attackCooldown--;
+                }
+            }
+            
+            draw() {
+                ctx.save();
+                if (this.direction === -1) {
+                    ctx.scale(-1, 1);
+                    ctx.translate(-this.x - this.width, 0);
+                } else {
+                    ctx.translate(this.x, 0);
+                }
+                
+                const sprite = createEnemySprite(this.state, this.animFrame);
+                ctx.drawImage(sprite, 0, this.y);
+                ctx.restore();
+            }
+        }
+        
+        // Input event listeners
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+        
+        function updatePlayer() {
+            // Animation timer
+            player.animTimer++;
+            if (player.animTimer % 8 === 0) {
+                player.animFrame++;
+            }
+            
+            // Invulnerability timer
+            if (player.invulnerableTimer > 0) {
+                player.invulnerableTimer--;
+            }
+            
+            // Attack timer
+            if (player.attackTimer > 0) {
+                player.attackTimer--;
+                if (player.attackTimer === 0) {
+                    player.state = 'idle';
+                }
+            }
+            
+            // Movement
+            if (keys['a']) {
+                player.velocityX = -player.speed;
+                player.direction = -1;
+                if (player.state === 'idle') player.state = 'walking';
+            } else if (keys['d']) {
+                player.velocityX = player.speed;
+                player.direction = 1;
+                if (player.state === 'idle') player.state = 'walking';
+            } else {
+                player.velocityX *= friction;
+                if (Math.abs(player.velocityX) < 0.1) {
+                    player.velocityX = 0;
+                    if (player.state === 'walking') player.state = 'idle';
+                }
+            }
+            
+            // Jump
+            if (keys['w'] && player.onGround) {
+                player.velocityY = -player.jumpPower;
+                player.onGround = false;
+            }
+            
+            // Crouch/Defend
+            if (keys['s'] && player.onGround) {
+                player.state = 'crouch';
+                player.velocityX *= 0.3; // Slow down when crouching
+            } else if (!keys['s'] && player.state === 'crouch') {
+                player.state = 'idle';
+            }
+            
+            // Attack
+            if (keys['j'] && player.attackTimer <= 0) {
+                player.state = 'attack';
+                player.attackTimer = 30;
+                
+                // Shoot arrow
+                const arrowX = player.direction === 1 ? player.x + player.width : player.x;
+                const arrowY = player.y + player.height / 2 - 2;
+                arrows.push(new Arrow(arrowX, arrowY, player.direction));
+            }
+            
+            // Apply gravity
+            player.velocityY += gravity;
+            
+            // Update position
+            player.x += player.velocityX;
+            player.y += player.velocityY;
+            
+            // Ground collision
+            if (player.y + player.height >= groundY) {
+                player.y = groundY - player.height;
+                player.velocityY = 0;
+                player.onGround = true;
+            } else {
+                player.onGround = false;
+            }
+            
+            // Keep player in bounds
+            if (player.x < 0) player.x = 0;
+            if (player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+        }
+        
+        function spawnEnemy() {
+            if (canSpawnEnemy && enemies.length === 0) {
+                enemySpawnTimer++;
+                if (enemySpawnTimer > 120) { // 2 seconds at 60fps
+                    const side = Math.random() > 0.5 ? 'left' : 'right';
+                    const x = side === 'left' ? -64 : canvas.width;
+                    enemies.push(new Enemy(x, side));
+                    enemySpawnTimer = 0;
+                    canSpawnEnemy = false;
+                }
+            }
+        }
+        
+        function drawPlayer() {
+            ctx.save();
+            
+            // Flashing effect when invulnerable
+            if (player.invulnerableTimer > 0 && Math.floor(player.invulnerableTimer / 5) % 2 === 0) {
+                ctx.globalAlpha = 0.5;
+            }
+            
+            const sprite = createPlayerSprite(player.state, player.animFrame, player.direction);
+            ctx.drawImage(sprite, player.x, player.y);
+            ctx.restore();
+        }
+        
+        function updateGame() {
+            if (gameState !== 'playing') return;
+            
+            updatePlayer();
+            spawnEnemy();
+            
+            // Update arrows
+            arrows.forEach((arrow, arrowIndex) => {
+                arrow.update();
+                
+                // Check arrow-enemy collision
+                enemies.forEach((enemy, enemyIndex) => {
+                    if (arrow.x < enemy.x + enemy.width &&
+                        arrow.x + arrow.width > enemy.x &&
+                        arrow.y < enemy.y + enemy.height &&
+                        arrow.y + arrow.height > enemy.y) {
+                        // Hit enemy
+                        enemies.splice(enemyIndex, 1);
+                        arrows.splice(arrowIndex, 1);
+                        score += 10;
+                        canSpawnEnemy = true;
+                    }
+                });
+                
+                // Remove arrows that are offscreen
+                if (arrow.isOffscreen()) {
+                    arrows.splice(arrowIndex, 1);
+                }
+            });
+            
+            // Update enemies
+            enemies.forEach(enemy => {
+                enemy.update();
+            });
+            
+            // Update HUD
+            document.getElementById('health').textContent = player.health;
+            document.getElementById('score').textContent = score;
+        }
+        
+        function drawGame() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background (sky)
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#87CEEB');
+            gradient.addColorStop(1, '#98FB98');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw ground
+            drawGround();
+            
+            // Draw player
+            drawPlayer();
+            
+            // Draw arrows
+            arrows.forEach(arrow => {
+                arrow.draw();
+            });
+            
+            // Draw enemies
+            enemies.forEach(enemy => {
+                enemy.draw();
+            });
+        }
+        
+        function gameLoop() {
+            updateGame();
+            drawGame();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function startGame() {
+            gameState = 'playing';
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('controls').style.display = 'block';
+            document.getElementById('gameCanvas').style.display = 'block';
+            
+            // Reset game state
+            player.health = player.maxHealth;
+            player.x = 400;
+            player.y = 400;
+            player.velocityX = 0;
+            player.velocityY = 0;
+            player.state = 'idle';
+            player.direction = 1;
+            enemies = [];
+            arrows = [];
+            score = 0;
+            canSpawnEnemy = true;
+            enemySpawnTimer = 0;
+        }
+        
+        function gameOver() {
+            gameState = 'gameOver';
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        function showMenu() {
+            gameState = 'menu';
+            document.getElementById('menu').style.display = 'block';
+            document.getElementById('hud').style.display = 'none';
+            document.getElementById('controls').style.display = 'none';
+            document.getElementById('gameCanvas').style.display = 'none';
+            document.getElementById('gameOver').style.display = 'none';
+        }
+        
+        function exitGame() {
+            if (confirm('Bạn có chắc chắn muốn thoát?')) {
+                window.close();
+            }
+        }
+        
+        // Start the game loop
+        gameLoop();
+    </script>
+</body>
+</html>
